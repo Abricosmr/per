@@ -91,142 +91,627 @@
         </div>
         <div id="statusMessage" class="status"></div>
     </div>
+
     <script>
-        const STORAGE_KEY='fileSharingCodes';let selectedFiles=[];let currentFileData=null;
-        document.addEventListener('DOMContentLoaded',function(){loadMyFiles();setupFileDrop();});
-        function switchTab(tabName){
-            document.querySelectorAll('.tab-content').forEach(tab=>{tab.classList.remove('active');});
-            document.querySelectorAll('.tab').forEach(tab=>{tab.classList.remove('active');});
-            document.getElementById(tabName+'-tab').classList.add('active');
+        // Улучшенное хранилище с IndexedDB для больших файлов
+        const DB_NAME = 'FileShareDB';
+        const DB_VERSION = 1;
+        const STORE_NAME = 'files';
+        let db = null;
+        let selectedFiles = [];
+        let currentFileData = null;
+
+        // Инициализация IndexedDB
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                if (db) {
+                    resolve(db);
+                    return;
+                }
+
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                
+                request.onerror = () => {
+                    console.error('Ошибка IndexedDB');
+                    reject('Ошибка базы данных');
+                };
+                
+                request.onsuccess = () => {
+                    db = request.result;
+                    console.log('База данных инициализирована');
+                    resolve(db);
+                };
+                
+                request.onupgradeneeded = (event) => {
+                    const database = event.target.result;
+                    if (!database.objectStoreNames.contains(STORE_NAME)) {
+                        const store = database.createObjectStore(STORE_NAME, { keyPath: 'code' });
+                        store.createIndex('expiry', 'expiry', { unique: false });
+                        store.createIndex('timestamp', 'timestamp', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // Сохранить файл в IndexedDB
+        async function saveFileToDB(code, data) {
+            try {
+                await initDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readwrite');
+                    const store = transaction.objectStore(STORE_NAME);
+                    
+                    const fileData = {
+                        code: code,
+                        message: data.message,
+                        files: data.files,
+                        password: data.password,
+                        timestamp: data.timestamp,
+                        expiry: data.expiry,
+                        downloads: 0
+                    };
+                    
+                    const request = store.put(fileData);
+                    
+                    request.onsuccess = () => {
+                        console.log('Файл сохранен в БД:', code);
+                        resolve(true);
+                    };
+                    
+                    request.onerror = () => {
+                        console.error('Ошибка сохранения в БД');
+                        reject(false);
+                    };
+                });
+            } catch (error) {
+                console.error('Ошибка при сохранении:', error);
+                // Fallback на LocalStorage
+                return saveToLocalStorage(code, data);
+            }
+        }
+
+        // Получить файл из IndexedDB
+        async function getFileFromDB(code) {
+            try {
+                await initDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readonly');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const request = store.get(code);
+                    
+                    request.onsuccess = () => {
+                        resolve(request.result);
+                    };
+                    
+                    request.onerror = () => {
+                        reject(null);
+                    };
+                });
+            } catch (error) {
+                console.error('Ошибка при чтении:', error);
+                // Fallback на LocalStorage
+                return getFromLocalStorage(code);
+            }
+        }
+
+        // Удалить файл из IndexedDB
+        async function deleteFileFromDB(code) {
+            try {
+                await initDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([STORE_NAME], 'readwrite');
+                    const store = transaction.objectStore(STORE_NAME);
+                    const request = store.delete(code);
+                    
+                    request.onsuccess = () => {
+                        resolve(true);
+                    };
+                    
+                    request.onerror = () => {
+                        reject(false);
+                    };
+                });
+            } catch (error) {
+                console.error('Ошибка при удалении:', error);
+                return deleteFromLocalStorage(code);
+            }
+        }
+
+        // Fallback на LocalStorage для маленьких данных
+        function saveToLocalStorage(code, data) {
+            try {
+                const allData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                allData[code] = data;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
+                return true;
+            } catch (e) {
+                console.error('LocalStorage переполнен');
+                return false;
+            }
+        }
+
+        function getFromLocalStorage(code) {
+            try {
+                const allData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                return allData[code] || null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function deleteFromLocalStorage(code) {
+            try {
+                const allData = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+                delete allData[code];
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(allData));
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        // Остальной код остается прежним, но использует новые функции
+        document.addEventListener('DOMContentLoaded', function() {
+            initDB().then(() => {
+                loadMyFiles();
+                setupFileDrop();
+                cleanExpiredFiles();
+                checkUrlCode();
+            });
+        });
+
+        // Проверка кода в URL
+        function checkUrlCode() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const codeFromUrl = urlParams.get('code');
+            if (codeFromUrl) {
+                document.getElementById('accessCode').value = codeFromUrl;
+                switchTab('download');
+                setTimeout(() => downloadByCode(), 500);
+            }
+        }
+
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.getElementById(tabName + '-tab').classList.add('active');
             document.querySelector(`.tab[onclick*="${tabName}"]`).classList.add('active');
             hideStatus();
         }
-        function setupFileDrop(){
-            const dropArea=document.getElementById('dropArea');
-            const fileInput=document.getElementById('fileInput');
-            dropArea.addEventListener('click',()=>fileInput.click());
-            fileInput.addEventListener('change',function(e){handleFiles(this.files);});
-            ['dragenter','dragover','dragleave','drop'].forEach(eventName=>{dropArea.addEventListener(eventName,preventDefaults,false);});
-            function preventDefaults(e){e.preventDefault();e.stopPropagation();}
-            ['dragenter','dragover'].forEach(eventName=>{dropArea.addEventListener(eventName,highlight,false);});
-            ['dragleave','drop'].forEach(eventName=>{dropArea.addEventListener(eventName,unhighlight,false);});
-            function highlight(){dropArea.classList.add('dragover');}
-            function unhighlight(){dropArea.classList.remove('dragover');}
-            dropArea.addEventListener('drop',function(e){const dt=e.dataTransfer;const files=dt.files;handleFiles(files);});
-        }
-        function handleFiles(files){selectedFiles=Array.from(files);updateFileList();}
-        function updateFileList(){
-            const fileList=document.getElementById('fileList');
-            if(selectedFiles.length===0){fileList.innerHTML='<p style="text-align:center;color:#666;">Файлы не выбраны</p>';return;}
-            let html='<h4>Выбранные файлы:</h4>';let totalSize=0;
-            selectedFiles.forEach((file,index)=>{totalSize+=file.size;
-                html+=`<div class="file-item"><div><strong>${file.name}</strong><br><small>${formatBytes(file.size)}</small></div><button onclick="removeFile(${index})" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">✕</button></div>`;
+
+        function setupFileDrop() {
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('fileInput');
+            
+            dropArea.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', function(e) { handleFiles(this.files); });
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, preventDefaults, false);
             });
-            html+=`<p style="text-align:right;margin-top:10px;"><strong>Общий размер:</strong> ${formatBytes(totalSize)}</p>`;
-            fileList.innerHTML=html;
-        }
-        function removeFile(index){selectedFiles.splice(index,1);updateFileList();}
-        function generateCode(){return Math.floor(100000+Math.random()*900000).toString();}
-        function uploadFile(){
-            const message=document.getElementById('message').value;
-            const password=document.getElementById('password').value;
-            if(selectedFiles.length===0&&!message.trim()){showStatus('Добавьте файл или введите текст!','error');return;}
-            for(const file of selectedFiles){if(file.size>5*1024*1024){showStatus(`Файл "${file.name}" превышает 5 МБ!`,'error');return;}}
-            let code;let codes=getAllCodes();
-            do{code=generateCode();}while(codes[code]);
-            const filePromises=selectedFiles.map(file=>{return new Promise((resolve)=>{const reader=new FileReader();reader.onload=function(e){resolve({name:file.name,type:file.type,size:file.size,data:e.target.result});};reader.readAsDataURL(file);});});
-            Promise.all(filePromises).then(fileDataArray=>{
-                const fileData={message:message,files:fileDataArray,password:password||null,timestamp:Date.now(),expiry:Date.now()+(7*24*60*60*1000),downloads:0};
-                saveFileData(code,fileData);showUploadResult(code);saveToMyFiles(code,fileData);
-                document.getElementById('message').value='';document.getElementById('password').value='';selectedFiles=[];updateFileList();fileInput.value='';
-                showStatus('Файл успешно загружен!','success');
+            
+            function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() { dropArea.classList.add('dragover'); }
+            function unhighlight() { dropArea.classList.remove('dragover'); }
+            
+            dropArea.addEventListener('drop', function(e) {
+                const files = e.dataTransfer.files;
+                handleFiles(files);
             });
         }
-        function showUploadResult(code){
-            const resultDiv=document.getElementById('uploadResult');
-            const codeElement=document.getElementById('generatedCode');
-            const linkElement=document.getElementById('shareLink');
-            codeElement.textContent=code;linkElement.value=window.location.href.split('#')[0]+'?code='+code;
-            resultDiv.style.display='block';resultDiv.scrollIntoView({behavior:'smooth'});
+
+        function handleFiles(files) {
+            selectedFiles = Array.from(files);
+            updateFileList();
         }
-        function downloadByCode(){
-            const code=document.getElementById('accessCode').value.trim();
-            const passwordSection=document.getElementById('passwordSection');
-            if(!code||code.length!==6){showStatus('Введите корректный 6-значный код!','error');return;}
-            const fileData=getFileData(code);
-            if(!fileData){showStatus('Файл не найден или срок хранения истёк!','error');return;}
-            if(Date.now()>fileData.expiry){deleteFileData(code);showStatus('Срок хранения файла истёк!','error');return;}
-            if(fileData.password){passwordSection.style.display='block';currentFileData=fileData;showStatus('Требуется пароль для доступа','info');return;}
-            currentFileData=fileData;showFileInfo(fileData);
-        }
-        function showFileInfo(fileData){
-            const resultDiv=document.getElementById('downloadResult');
-            const fileInfo=document.getElementById('fileInfo');
-            let html='<div class="info-box">';
-            if(fileData.message){html+=`<p><strong>Сообщение:</strong> ${fileData.message.substring(0,100)}${fileData.message.length>100?'...':''}</p>`;}
-            if(fileData.files&&fileData.files.length>0){
-                html+=`<p><strong>Файлов:</strong> ${fileData.files.length}</p>`;
-                fileData.files.forEach(file=>{html+=`<div class="file-item"><div>📄 ${file.name} (${formatBytes(file.size)})</div></div>`;});
+
+        function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            
+            if (selectedFiles.length === 0) {
+                fileList.innerHTML = '<p style="text-align:center;color:#666;">Файлы не выбраны</p>';
+                return;
             }
-            const expiryDate=new Date(fileData.expiry);html+=`<p><small>Доступен до: ${expiryDate.toLocaleDateString()}</small></p></div>`;
-            fileInfo.innerHTML=html;resultDiv.style.display='block';document.getElementById('passwordSection').style.display='none';
-            fileData.downloads=(fileData.downloads||0)+1;saveFileData(document.getElementById('accessCode').value.trim(),fileData);
+            
+            let html = '<h4>Выбранные файлы:</h4>';
+            let totalSize = 0;
+            
+            selectedFiles.forEach((file, index) => {
+                totalSize += file.size;
+                html += `
+                    <div class="file-item">
+                        <div>
+                            <strong>${file.name}</strong><br>
+                            <small>${formatBytes(file.size)}</small>
+                        </div>
+                        <button onclick="removeFile(${index})" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">
+                            ✕
+                        </button>
+                    </div>
+                `;
+            });
+            
+            html += `<p style="text-align:right;margin-top:10px;"><strong>Общий размер:</strong> ${formatBytes(totalSize)}</p>`;
+            fileList.innerHTML = html;
         }
-        function processDownload(){
-            if(!currentFileData)return;
-            if(currentFileData.files&&currentFileData.files.length>0){
-                if(currentFileData.files.length===1){downloadFile(currentFileData.files[0]);}
-                else{currentFileData.files.forEach(file=>{downloadFile(file);});showStatus('Все файлы скачаны!','success');}
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileList();
+        }
+
+        function generateCode() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        async function uploadFile() {
+            const message = document.getElementById('message').value;
+            const password = document.getElementById('password').value;
+            
+            if (selectedFiles.length === 0 && !message.trim()) {
+                showStatus('Добавьте файл или введите текст!', 'error');
+                return;
             }
-            if(currentFileData.message){alert('Полный текст сообщения:\n\n'+currentFileData.message);}
-        }
-        function downloadFile(fileData){
-            const link=document.createElement('a');link.href=fileData.data;link.download=fileData.name;document.body.appendChild(link);link.click();document.body.removeChild(link);
-        }
-        function viewTextOnly(){
-            if(currentFileData&&currentFileData.message){
-                const textWindow=window.open('','_blank');
-                textWindow.document.write(`<html><head><title>Текстовое сообщение</title></head><body style="padding:20px;font-family:Arial;white-space:pre-wrap;"><h2>📝 Текстовое сообщение</h2><hr>${currentFileData.message}</body></html>`);
+            
+            for (const file of selectedFiles) {
+                if (file.size > 5 * 1024 * 1024) {
+                    showStatus(`Файл "${file.name}" превышает 5 МБ!`, 'error');
+                    return;
+                }
+            }
+            
+            // Генерация уникального кода
+            let code;
+            let existingFile = null;
+            do {
+                code = generateCode();
+                // Проверяем, существует ли код
+                existingFile = await getFileFromDB(code);
+            } while (existingFile);
+            
+            // Чтение файлов
+            const filePromises = selectedFiles.map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        resolve({
+                            name: file.name,
+                            type: file.type,
+                            size: file.size,
+                            data: e.target.result
+                        });
+                    };
+                    reader.readAsDataURL(file);
+                });
+            });
+            
+            try {
+                const fileDataArray = await Promise.all(filePromises);
+                
+                const fileData = {
+                    message: message,
+                    files: fileDataArray,
+                    password: password || null,
+                    timestamp: Date.now(),
+                    expiry: Date.now() + (7 * 24 * 60 * 60 * 1000),
+                    downloads: 0
+                };
+                
+                // Сохраняем в IndexedDB
+                const saved = await saveFileToDB(code, fileData);
+                
+                if (saved) {
+                    showUploadResult(code);
+                    saveToMyFiles(code, fileData);
+                    
+                    // Очистка формы
+                    document.getElementById('message').value = '';
+                    document.getElementById('password').value = '';
+                    selectedFiles = [];
+                    updateFileList();
+                    document.getElementById('fileInput').value = '';
+                    
+                    showStatus('Файл успешно загружен!', 'success');
+                } else {
+                    showStatus('Ошибка при сохранении файла', 'error');
+                }
+            } catch (error) {
+                showStatus('Ошибка при загрузке файла', 'error');
             }
         }
-        document.getElementById('downloadPassword').addEventListener('keypress',function(e){
-            if(e.key==='Enter'){
-                const enteredPassword=this.value;const code=document.getElementById('accessCode').value.trim();const fileData=getFileData(code);
-                if(fileData.password===enteredPassword){currentFileData=fileData;showFileInfo(fileData);}else{showStatus('Неверный пароль!','error');}
+
+        function showUploadResult(code) {
+            const resultDiv = document.getElementById('uploadResult');
+            const codeElement = document.getElementById('generatedCode');
+            const linkElement = document.getElementById('shareLink');
+            
+            codeElement.textContent = code;
+            linkElement.value = window.location.origin + window.location.pathname + '?code=' + code;
+            
+            resultDiv.style.display = 'block';
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function downloadByCode() {
+            const code = document.getElementById('accessCode').value.trim();
+            const passwordSection = document.getElementById('passwordSection');
+            
+            if (!code || code.length !== 6) {
+                showStatus('Введите корректный 6-значный код!', 'error');
+                return;
+            }
+            
+            try {
+                const fileData = await getFileFromDB(code);
+                
+                if (!fileData) {
+                    showStatus('Файл не найден!', 'error');
+                    return;
+                }
+                
+                // Проверка срока годности
+                if (Date.now() > fileData.expiry) {
+                    await deleteFileFromDB(code);
+                    showStatus('Срок хранения файла истёк!', 'error');
+                    return;
+                }
+                
+                // Проверка пароля
+                if (fileData.password) {
+                    passwordSection.style.display = 'block';
+                    currentFileData = fileData;
+                    showStatus('Требуется пароль для доступа', 'info');
+                    return;
+                }
+                
+                currentFileData = fileData;
+                showFileInfo(fileData);
+                
+                // Обновляем счетчик скачиваний
+                fileData.downloads = (fileData.downloads || 0) + 1;
+                await saveFileToDB(code, fileData);
+                
+            } catch (error) {
+                showStatus('Ошибка при поиске файла', 'error');
+            }
+        }
+
+        function showFileInfo(fileData) {
+            const resultDiv = document.getElementById('downloadResult');
+            const fileInfo = document.getElementById('fileInfo');
+            
+            let html = '<div class="info-box">';
+            
+            if (fileData.message) {
+                html += `<p><strong>Сообщение:</strong> ${fileData.message.substring(0, 100)}${fileData.message.length > 100 ? '...' : ''}</p>`;
+            }
+            
+            if (fileData.files && fileData.files.length > 0) {
+                html += `<p><strong>Файлов:</strong> ${fileData.files.length}</p>`;
+                fileData.files.forEach(file => {
+                    html += `<div class="file-item">
+                        <div>📄 ${file.name} (${formatBytes(file.size)})</div>
+                    </div>`;
+                });
+            }
+            
+            const expiryDate = new Date(fileData.expiry);
+            html += `<p><small>Доступен до: ${expiryDate.toLocaleDateString()}</small></p>`;
+            html += '</div>';
+            
+            fileInfo.innerHTML = html;
+            resultDiv.style.display = 'block';
+            document.getElementById('passwordSection').style.display = 'none';
+        }
+
+        function processDownload() {
+            if (!currentFileData) return;
+            
+            // Скачать файлы
+            if (currentFileData.files && currentFileData.files.length > 0) {
+                currentFileData.files.forEach(file => {
+                    downloadFile(file);
+                });
+                showStatus('Все файлы скачаны!', 'success');
+            }
+            
+            // Показать полный текст, если есть
+            if (currentFileData.message) {
+                alert('Полный текст сообщения:\n\n' + currentFileData.message);
+            }
+        }
+
+        function downloadFile(fileData) {
+            const link = document.createElement('a');
+            link.href = fileData.data;
+            link.download = fileData.name;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function viewTextOnly() {
+            if (currentFileData && currentFileData.message) {
+                const textWindow = window.open('', '_blank');
+                textWindow.document.write(`
+                    <html>
+                    <head><title>Текстовое сообщение</title></head>
+                    <body style="padding:20px;font-family:Arial;white-space:pre-wrap;">
+                        <h2>📝 Текстовое сообщение</h2>
+                        <hr>
+                        ${currentFileData.message}
+                    </body>
+                    </html>
+                `);
+            }
+        }
+
+        // Проверка пароля при нажатии Enter
+        document.getElementById('downloadPassword').addEventListener('keypress', async function(e) {
+            if (e.key === 'Enter') {
+                const enteredPassword = this.value;
+                const code = document.getElementById('accessCode').value.trim();
+                
+                try {
+                    const fileData = await getFileFromDB(code);
+                    if (fileData && fileData.password === enteredPassword) {
+                        currentFileData = fileData;
+                        showFileInfo(fileData);
+                        this.value = '';
+                    } else {
+                        showStatus('Неверный пароль!', 'error');
+                    }
+                } catch (error) {
+                    showStatus('Ошибка при проверке пароля', 'error');
+                }
             }
         });
-        function getAllCodes(){const data=localStorage.getItem(STORAGE_KEY);return data?JSON.parse(data):{};}
-        function getFileData(code){const allData=getAllCodes();return allData[code];}
-        function saveFileData(code,data){const allData=getAllCodes();allData[code]=data;localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));}
-        function deleteFileData(code){const allData=getAllCodes();delete allData[code];localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));}
-        function saveToMyFiles(code,data){
-            const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');
-            myFiles[code]={code:code,timestamp:data.timestamp,hasMessage:!!data.message,fileCount:data.files.length,downloads:0};
-            localStorage.setItem('myFiles',JSON.stringify(myFiles));loadMyFiles();
+
+        // Мои файлы
+        function saveToMyFiles(code, data) {
+            const myFiles = JSON.parse(localStorage.getItem('myFiles') || '{}');
+            myFiles[code] = {
+                code: code,
+                timestamp: data.timestamp,
+                hasMessage: !!data.message,
+                fileCount: data.files.length,
+                downloads: 0
+            };
+            localStorage.setItem('myFiles', JSON.stringify(myFiles));
+            loadMyFiles();
         }
-        function loadMyFiles(){
-            const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');
-            const container=document.getElementById('myFilesList');
-            const files=Object.values(myFiles);
-            if(files.length===0){container.innerHTML='<p style="text-align:center;color:#666;">Вы еще не загружали файлов</p>';return;}
-            let html='<h4>Мои загруженные файлы:</h4>';
-            files.sort((a,b)=>b.timestamp-a.timestamp).forEach(file=>{
-                const date=new Date(file.timestamp);
-                html+=`<div class="file-item"><div><strong>Код: ${file.code}</strong><br><small>Загружен: ${date.toLocaleDateString()}</small><br><small>Файлов: ${file.fileCount} • Сообщение: ${file.hasMessage?'✓':'✗'}</small></div><div><button onclick="copyCode('${file.code}')" style="background:#3498db;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;margin-right:5px;">📋</button><button onclick="deleteMyFile('${file.code}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">🗑️</button></div></div>`;
+
+        function loadMyFiles() {
+            const myFiles = JSON.parse(localStorage.getItem('myFiles') || '{}');
+            const container = document.getElementById('myFilesList');
+            const files = Object.values(myFiles);
+            
+            if (files.length === 0) {
+                container.innerHTML = '<p style="text-align:center;color:#666;">Вы еще не загружали файлов</p>';
+                return;
+            }
+            
+            let html = '<h4>Мои загруженные файлы:</h4>';
+            
+            files.sort((a, b) => b.timestamp - a.timestamp).forEach(file => {
+                const date = new Date(file.timestamp);
+                html += `
+                    <div class="file-item">
+                        <div>
+                            <strong>Код: ${file.code}</strong><br>
+                            <small>Загружен: ${date.toLocaleDateString()}</small><br>
+                            <small>Файлов: ${file.fileCount} • Сообщение: ${file.hasMessage ? '✓' : '✗'}</small>
+                        </div>
+                        <div>
+                            <button onclick="copyCode('${file.code}')" style="background:#3498db;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;margin-right:5px;">
+                                📋
+                            </button>
+                            <button onclick="deleteMyFile('${file.code}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                `;
             });
-            container.innerHTML=html;
+            
+            container.innerHTML = html;
         }
-        function deleteMyFile(code){const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');delete myFiles[code];localStorage.setItem('myFiles',JSON.stringify(myFiles));loadMyFiles();showStatus('Файл удален из списка','success');}
-        function clearAllFiles(){if(confirm('Удалить все ваши файлы? Это не удалит их у получателей.')){localStorage.removeItem('myFiles');loadMyFiles();showStatus('Все файлы удалены','success');}}
-        function copyCode(code){navigator.clipboard.writeText(code);showStatus('Код скопирован в буфер!','success');}
-        function formatBytes(bytes,decimals=2){if(bytes===0)return'0 Bytes';const k=1024;const dm=decimals<0?0:decimals;const sizes=['Bytes','KB','MB','GB'];const i=Math.floor(Math.log(bytes)/Math.log(k));return parseFloat((bytes/Math.pow(k,i)).toFixed(dm))+' '+sizes[i];}
-        function showStatus(message,type){const status=document.getElementById('statusMessage');status.textContent=message;status.className=`status ${type}`;status.style.display='block';setTimeout(hideStatus,5000);}
-        function hideStatus(){document.getElementById('statusMessage').style.display='none';}
-        function copyToClipboard(elementId){const element=document.getElementById(elementId);const text=element.tagName==='INPUT'?element.value:element.textContent;navigator.clipboard.writeText(text).then(()=>{showStatus('Скопировано в буфер обмена!','success');});}
-        function cleanExpiredFiles(){const allData=getAllCodes();const now=Date.now();let cleaned=0;for(const[code,data]of Object.entries(allData)){if(now>data.expiry){delete allData[code];cleaned++;}}if(cleaned>0){localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));console.log(`Очищено ${cleaned} устаревших файлов`);}}
-        cleanExpiredFiles();
-        const urlParams=new URLSearchParams(window.location.search);const codeFromUrl=urlParams.get('code');
-        if(codeFromUrl){document.getElementById('accessCode').value=codeFromUrl;switchTab('download');setTimeout(()=>downloadByCode(),500);}
+
+        async function deleteMyFile(code) {
+            if (confirm('Удалить этот файл?')) {
+                await deleteFileFromDB(code);
+                
+                const myFiles = JSON.parse(localStorage.getItem('myFiles') || '{}');
+                delete myFiles[code];
+                localStorage.setItem('myFiles', JSON.stringify(myFiles));
+                loadMyFiles();
+                showStatus('Файл удален', 'success');
+            }
+        }
+
+        function clearAllFiles() {
+            if (confirm('Удалить все ваши файлы? Это не удалит их у получателей.')) {
+                localStorage.removeItem('myFiles');
+                loadMyFiles();
+                showStatus('Все файлы удалены из списка', 'success');
+            }
+        }
+
+        function copyCode(code) {
+            navigator.clipboard.writeText(code);
+            showStatus('Код скопирован в буфер!', 'success');
+        }
+
+        // Вспомогательные функции
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('statusMessage');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            
+            setTimeout(hideStatus, 5000);
+        }
+
+        function hideStatus() {
+            document.getElementById('statusMessage').style.display = 'none';
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.tagName === 'INPUT' ? element.value : element.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                showStatus('Скопировано в буфер обмена!', 'success');
+            });
+        }
+
+        // Очистка устаревших файлов
+        async function cleanExpiredFiles() {
+            try {
+                await initDB();
+                const transaction = db.transaction([STORE_NAME], 'readonly');
+                const store = transaction.objectStore(STORE_NAME);
+                const expiryIndex = store.index('expiry');
+                const range = IDBKeyRange.upperBound(Date.now());
+                const request = expiryIndex.openCursor(range);
+                let cleaned = 0;
+                
+                request.onsuccess = function(event) {
+                    const cursor = event.target.result;
+                    if (cursor) {
+                        deleteFileFromDB(cursor.value.code);
+                        cleaned++;
+                        cursor.continue();
+                    } else {
+                        if (cleaned > 0) {
+                            console.log(`Очищено ${cleaned} устаревших файлов`);
+                        }
+                    }
+                };
+            } catch (error) {
+                console.error('Ошибка при очистке файлов:', error);
+            }
+        }
+
+        // Fallback константа для LocalStorage
+        const STORAGE_KEY = 'fileSharingCodes_backup';
     </script>
 </body>
 </html>
