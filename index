@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📁 Файлообменник с кодом доступа</title>
+    <style>
+        *{box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
+        body{margin:0;padding:20px;background:linear-gradient(135deg,#6a11cb 0%,#2575fc 100%);min-height:100vh;color:#333}
+        .container{max-width:800px;margin:30px auto;background:#fff;padding:40px;border-radius:20px;box-shadow:0 25px 50px rgba(0,0,0,.25)}
+        h1{color:#2c3e50;text-align:center;margin-bottom:10px;display:flex;align-items:center;justify-content:center;gap:15px}
+        .tabs{display:flex;gap:10px;margin-bottom:30px;border-bottom:2px solid #eee;padding-bottom:10px}
+        .tab{padding:12px 25px;background:#f8f9fa;border:none;border-radius:8px 8px 0 0;cursor:pointer;font-weight:600;transition:all .3s;flex:1;text-align:center}
+        .tab.active{background:#3498db;color:#fff;transform:translateY(-2px);box-shadow:0 4px 12px rgba(52,152,219,.3)}
+        .tab-content{display:none;animation:fadeIn .5s}
+        .tab-content.active{display:block}
+        @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        .form-group{margin-bottom:25px}
+        label{display:block;margin-bottom:8px;font-weight:600;color:#2c3e50;font-size:15px}
+        input[type="text"],textarea,input[type="password"]{width:100%;padding:15px;border:2px solid #e0e0e0;border-radius:10px;font-size:16px;transition:border .3s}
+        input:focus,textarea:focus{outline:none;border-color:#3498db;box-shadow:0 0 0 3px rgba(52,152,219,.1)}
+        textarea{min-height:120px;resize:vertical;line-height:1.5}
+        .file-drop-area{border:3px dashed #3498db;border-radius:15px;padding:40px 20px;text-align:center;background:#f8fafc;cursor:pointer;transition:all .3s;margin-bottom:15px}
+        .file-drop-area:hover{background:#e8f4fc;transform:translateY(-2px)}
+        .file-drop-area.dragover{background:#d4edff;border-color:#2980b9;transform:scale(1.01)}
+        .file-list{background:#f8f9fa;padding:15px;border-radius:10px;margin-top:15px}
+        .file-item{display:flex;justify-content:space-between;align-items:center;padding:10px;background:#fff;border-radius:8px;margin-bottom:8px;border:1px solid #eee}
+        .btn{background:linear-gradient(135deg,#3498db,#2c3e50);color:#fff;border:none;padding:16px 32px;font-size:18px;border-radius:10px;cursor:pointer;width:100%;font-weight:600;transition:all .3s;margin-top:10px}
+        .btn:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(52,152,219,.3)}
+        .btn:active{transform:translateY(0)}
+        .btn-secondary{background:linear-gradient(135deg,#95a5a6,#7f8c8d)}
+        .code-display{text-align:center;padding:30px;background:linear-gradient(135deg,#f8f9fa,#e9ecef);border-radius:15px;margin-top:30px;border:2px dashed #3498db}
+        .code{font-size:48px;font-weight:800;letter-spacing:10px;color:#2c3e50;background:#fff;padding:20px;border-radius:10px;display:inline-block;margin:15px 0;text-shadow:2px 2px 4px rgba(0,0,0,.1)}
+        .copy-btn{background:#27ae60;padding:12px 25px;border-radius:8px;color:#fff;border:none;cursor:pointer;font-size:16px;margin-top:15px;display:inline-flex;align-items:center;gap:8px}
+        .copy-btn:hover{background:#219653}
+        .file-preview{max-width:100%;max-height:200px;margin:15px 0;border-radius:10px;box-shadow:0 4px 12px rgba(0,0,0,.1)}
+        .status{padding:15px;border-radius:10px;margin:20px 0;text-align:center;font-weight:600;display:none}
+        .success{background:#d4edda;color:#155724;border:1px solid #c3e6cb;display:block}
+        .error{background:#f8d7da;color:#721c24;border:1px solid #f5c6cb;display:block}
+        .info-box{background:#e3f2fd;padding:15px;border-radius:10px;margin:20px 0;border-left:5px solid #2196f3}
+        .instructions{font-size:14px;color:#666;margin-top:8px}
+        .expiry-info{background:#fff3cd;padding:12px;border-radius:8px;margin:15px 0;border-left:4px solid #ffc107}
+        @media (max-width:600px){
+            .container{padding:20px;margin:10px auto}
+            .tabs{flex-direction:column}
+            .code{font-size:32px;letter-spacing:5px;padding:15px}
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span>📁</span><span>Файлообменник с кодом</span><span>🔐</span></h1>
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('upload')">📤 Загрузить файл</button>
+            <button class="tab" onclick="switchTab('download')">📥 Получить по коду</button>
+            <button class="tab" onclick="switchTab('manage')">⚙️ Мои файлы</button>
+        </div>
+        <div id="upload-tab" class="tab-content active">
+            <div class="info-box"><strong>Как это работает:</strong> Загрузите файл или введите текст, получите уникальный 6-значный код. Передайте код другому человеку для скачивания.</div>
+            <div class="form-group"><label for="message">Текстовое сообщение (необязательно):</label><textarea id="message" placeholder="Введите текст, который нужно передать..."></textarea></div>
+            <div class="form-group"><label>Файл для загрузки (необязательно):</label>
+                <div class="file-drop-area" id="dropArea"><div style="font-size:48px;">📎</div><p><strong>Перетащите файлы сюда</strong></p><p style="color:#666;">или нажмите для выбора</p><input type="file" id="fileInput" style="display:none;"><p class="instructions">Максимум 5 МБ на файл. Можно загрузить несколько файлов.</p></div>
+                <div id="fileList" class="file-list"></div>
+            </div>
+            <div class="form-group"><label for="password">Пароль (необязательно):</label><input type="password" id="password" placeholder="Защитите файл паролем"><p class="instructions">Если установите пароль, для скачивания нужно будет ввести его</p></div>
+            <div class="expiry-info">⏰ Файлы хранятся 7 дней, затем автоматически удаляются</div>
+            <button class="btn" onclick="uploadFile()">✅ Сгенерировать код доступа</button>
+            <div id="uploadResult" class="code-display" style="display:none;">
+                <h3>🎉 Файл успешно загружен!</h3><p>Передайте этот код для скачивания:</p>
+                <div class="code" id="generatedCode">000000</div><p>Ссылка для скачивания:</p>
+                <input type="text" id="shareLink" readonly style="width:100%;padding:10px;margin:10px 0;text-align:center;">
+                <button class="copy-btn" onclick="copyToClipboard('generatedCode')">📋 Копировать код</button>
+                <button class="copy-btn" onclick="copyToClipboard('shareLink')" style="background:#9b59b6;margin-left:10px;">🔗 Копировать ссылку</button>
+            </div>
+        </div>
+        <div id="download-tab" class="tab-content">
+            <div class="info-box"><strong>Введите 6-значный код</strong>, который вы получили от отправителя</div>
+            <div class="form-group"><label for="accessCode">Код доступа (6 цифр):</label><input type="text" id="accessCode" placeholder="123456" maxlength="6" style="text-align:center;font-size:24px;letter-spacing:10px;"></div>
+            <div class="form-group" id="passwordSection" style="display:none;"><label for="downloadPassword">Введите пароль:</label><input type="password" id="downloadPassword" placeholder="Пароль для доступа к файлу"></div>
+            <button class="btn" onclick="downloadByCode()">🔍 Найти файл</button>
+            <div id="downloadResult" style="display:none;">
+                <div id="fileInfo"></div>
+                <button class="btn" onclick="processDownload()">📥 Скачать файл</button>
+                <button class="btn btn-secondary" onclick="viewTextOnly()">👁️ Просмотреть только текст</button>
+            </div>
+        </div>
+        <div id="manage-tab" class="tab-content">
+            <div class="info-box">Здесь отображаются файлы, которые вы загрузили с этого устройства</div>
+            <div id="myFilesList" class="file-list"></div>
+            <button class="btn btn-secondary" onclick="clearAllFiles()">🗑️ Удалить все мои файлы</button>
+        </div>
+        <div id="statusMessage" class="status"></div>
+    </div>
+    <script>
+        const STORAGE_KEY='fileSharingCodes';let selectedFiles=[];let currentFileData=null;
+        document.addEventListener('DOMContentLoaded',function(){loadMyFiles();setupFileDrop();});
+        function switchTab(tabName){
+            document.querySelectorAll('.tab-content').forEach(tab=>{tab.classList.remove('active');});
+            document.querySelectorAll('.tab').forEach(tab=>{tab.classList.remove('active');});
+            document.getElementById(tabName+'-tab').classList.add('active');
+            document.querySelector(`.tab[onclick*="${tabName}"]`).classList.add('active');
+            hideStatus();
+        }
+        function setupFileDrop(){
+            const dropArea=document.getElementById('dropArea');
+            const fileInput=document.getElementById('fileInput');
+            dropArea.addEventListener('click',()=>fileInput.click());
+            fileInput.addEventListener('change',function(e){handleFiles(this.files);});
+            ['dragenter','dragover','dragleave','drop'].forEach(eventName=>{dropArea.addEventListener(eventName,preventDefaults,false);});
+            function preventDefaults(e){e.preventDefault();e.stopPropagation();}
+            ['dragenter','dragover'].forEach(eventName=>{dropArea.addEventListener(eventName,highlight,false);});
+            ['dragleave','drop'].forEach(eventName=>{dropArea.addEventListener(eventName,unhighlight,false);});
+            function highlight(){dropArea.classList.add('dragover');}
+            function unhighlight(){dropArea.classList.remove('dragover');}
+            dropArea.addEventListener('drop',function(e){const dt=e.dataTransfer;const files=dt.files;handleFiles(files);});
+        }
+        function handleFiles(files){selectedFiles=Array.from(files);updateFileList();}
+        function updateFileList(){
+            const fileList=document.getElementById('fileList');
+            if(selectedFiles.length===0){fileList.innerHTML='<p style="text-align:center;color:#666;">Файлы не выбраны</p>';return;}
+            let html='<h4>Выбранные файлы:</h4>';let totalSize=0;
+            selectedFiles.forEach((file,index)=>{totalSize+=file.size;
+                html+=`<div class="file-item"><div><strong>${file.name}</strong><br><small>${formatBytes(file.size)}</small></div><button onclick="removeFile(${index})" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">✕</button></div>`;
+            });
+            html+=`<p style="text-align:right;margin-top:10px;"><strong>Общий размер:</strong> ${formatBytes(totalSize)}</p>`;
+            fileList.innerHTML=html;
+        }
+        function removeFile(index){selectedFiles.splice(index,1);updateFileList();}
+        function generateCode(){return Math.floor(100000+Math.random()*900000).toString();}
+        function uploadFile(){
+            const message=document.getElementById('message').value;
+            const password=document.getElementById('password').value;
+            if(selectedFiles.length===0&&!message.trim()){showStatus('Добавьте файл или введите текст!','error');return;}
+            for(const file of selectedFiles){if(file.size>5*1024*1024){showStatus(`Файл "${file.name}" превышает 5 МБ!`,'error');return;}}
+            let code;let codes=getAllCodes();
+            do{code=generateCode();}while(codes[code]);
+            const filePromises=selectedFiles.map(file=>{return new Promise((resolve)=>{const reader=new FileReader();reader.onload=function(e){resolve({name:file.name,type:file.type,size:file.size,data:e.target.result});};reader.readAsDataURL(file);});});
+            Promise.all(filePromises).then(fileDataArray=>{
+                const fileData={message:message,files:fileDataArray,password:password||null,timestamp:Date.now(),expiry:Date.now()+(7*24*60*60*1000),downloads:0};
+                saveFileData(code,fileData);showUploadResult(code);saveToMyFiles(code,fileData);
+                document.getElementById('message').value='';document.getElementById('password').value='';selectedFiles=[];updateFileList();fileInput.value='';
+                showStatus('Файл успешно загружен!','success');
+            });
+        }
+        function showUploadResult(code){
+            const resultDiv=document.getElementById('uploadResult');
+            const codeElement=document.getElementById('generatedCode');
+            const linkElement=document.getElementById('shareLink');
+            codeElement.textContent=code;linkElement.value=window.location.href.split('#')[0]+'?code='+code;
+            resultDiv.style.display='block';resultDiv.scrollIntoView({behavior:'smooth'});
+        }
+        function downloadByCode(){
+            const code=document.getElementById('accessCode').value.trim();
+            const passwordSection=document.getElementById('passwordSection');
+            if(!code||code.length!==6){showStatus('Введите корректный 6-значный код!','error');return;}
+            const fileData=getFileData(code);
+            if(!fileData){showStatus('Файл не найден или срок хранения истёк!','error');return;}
+            if(Date.now()>fileData.expiry){deleteFileData(code);showStatus('Срок хранения файла истёк!','error');return;}
+            if(fileData.password){passwordSection.style.display='block';currentFileData=fileData;showStatus('Требуется пароль для доступа','info');return;}
+            currentFileData=fileData;showFileInfo(fileData);
+        }
+        function showFileInfo(fileData){
+            const resultDiv=document.getElementById('downloadResult');
+            const fileInfo=document.getElementById('fileInfo');
+            let html='<div class="info-box">';
+            if(fileData.message){html+=`<p><strong>Сообщение:</strong> ${fileData.message.substring(0,100)}${fileData.message.length>100?'...':''}</p>`;}
+            if(fileData.files&&fileData.files.length>0){
+                html+=`<p><strong>Файлов:</strong> ${fileData.files.length}</p>`;
+                fileData.files.forEach(file=>{html+=`<div class="file-item"><div>📄 ${file.name} (${formatBytes(file.size)})</div></div>`;});
+            }
+            const expiryDate=new Date(fileData.expiry);html+=`<p><small>Доступен до: ${expiryDate.toLocaleDateString()}</small></p></div>`;
+            fileInfo.innerHTML=html;resultDiv.style.display='block';document.getElementById('passwordSection').style.display='none';
+            fileData.downloads=(fileData.downloads||0)+1;saveFileData(document.getElementById('accessCode').value.trim(),fileData);
+        }
+        function processDownload(){
+            if(!currentFileData)return;
+            if(currentFileData.files&&currentFileData.files.length>0){
+                if(currentFileData.files.length===1){downloadFile(currentFileData.files[0]);}
+                else{currentFileData.files.forEach(file=>{downloadFile(file);});showStatus('Все файлы скачаны!','success');}
+            }
+            if(currentFileData.message){alert('Полный текст сообщения:\n\n'+currentFileData.message);}
+        }
+        function downloadFile(fileData){
+            const link=document.createElement('a');link.href=fileData.data;link.download=fileData.name;document.body.appendChild(link);link.click();document.body.removeChild(link);
+        }
+        function viewTextOnly(){
+            if(currentFileData&&currentFileData.message){
+                const textWindow=window.open('','_blank');
+                textWindow.document.write(`<html><head><title>Текстовое сообщение</title></head><body style="padding:20px;font-family:Arial;white-space:pre-wrap;"><h2>📝 Текстовое сообщение</h2><hr>${currentFileData.message}</body></html>`);
+            }
+        }
+        document.getElementById('downloadPassword').addEventListener('keypress',function(e){
+            if(e.key==='Enter'){
+                const enteredPassword=this.value;const code=document.getElementById('accessCode').value.trim();const fileData=getFileData(code);
+                if(fileData.password===enteredPassword){currentFileData=fileData;showFileInfo(fileData);}else{showStatus('Неверный пароль!','error');}
+            }
+        });
+        function getAllCodes(){const data=localStorage.getItem(STORAGE_KEY);return data?JSON.parse(data):{};}
+        function getFileData(code){const allData=getAllCodes();return allData[code];}
+        function saveFileData(code,data){const allData=getAllCodes();allData[code]=data;localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));}
+        function deleteFileData(code){const allData=getAllCodes();delete allData[code];localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));}
+        function saveToMyFiles(code,data){
+            const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');
+            myFiles[code]={code:code,timestamp:data.timestamp,hasMessage:!!data.message,fileCount:data.files.length,downloads:0};
+            localStorage.setItem('myFiles',JSON.stringify(myFiles));loadMyFiles();
+        }
+        function loadMyFiles(){
+            const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');
+            const container=document.getElementById('myFilesList');
+            const files=Object.values(myFiles);
+            if(files.length===0){container.innerHTML='<p style="text-align:center;color:#666;">Вы еще не загружали файлов</p>';return;}
+            let html='<h4>Мои загруженные файлы:</h4>';
+            files.sort((a,b)=>b.timestamp-a.timestamp).forEach(file=>{
+                const date=new Date(file.timestamp);
+                html+=`<div class="file-item"><div><strong>Код: ${file.code}</strong><br><small>Загружен: ${date.toLocaleDateString()}</small><br><small>Файлов: ${file.fileCount} • Сообщение: ${file.hasMessage?'✓':'✗'}</small></div><div><button onclick="copyCode('${file.code}')" style="background:#3498db;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;margin-right:5px;">📋</button><button onclick="deleteMyFile('${file.code}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;">🗑️</button></div></div>`;
+            });
+            container.innerHTML=html;
+        }
+        function deleteMyFile(code){const myFiles=JSON.parse(localStorage.getItem('myFiles')||'{}');delete myFiles[code];localStorage.setItem('myFiles',JSON.stringify(myFiles));loadMyFiles();showStatus('Файл удален из списка','success');}
+        function clearAllFiles(){if(confirm('Удалить все ваши файлы? Это не удалит их у получателей.')){localStorage.removeItem('myFiles');loadMyFiles();showStatus('Все файлы удалены','success');}}
+        function copyCode(code){navigator.clipboard.writeText(code);showStatus('Код скопирован в буфер!','success');}
+        function formatBytes(bytes,decimals=2){if(bytes===0)return'0 Bytes';const k=1024;const dm=decimals<0?0:decimals;const sizes=['Bytes','KB','MB','GB'];const i=Math.floor(Math.log(bytes)/Math.log(k));return parseFloat((bytes/Math.pow(k,i)).toFixed(dm))+' '+sizes[i];}
+        function showStatus(message,type){const status=document.getElementById('statusMessage');status.textContent=message;status.className=`status ${type}`;status.style.display='block';setTimeout(hideStatus,5000);}
+        function hideStatus(){document.getElementById('statusMessage').style.display='none';}
+        function copyToClipboard(elementId){const element=document.getElementById(elementId);const text=element.tagName==='INPUT'?element.value:element.textContent;navigator.clipboard.writeText(text).then(()=>{showStatus('Скопировано в буфер обмена!','success');});}
+        function cleanExpiredFiles(){const allData=getAllCodes();const now=Date.now();let cleaned=0;for(const[code,data]of Object.entries(allData)){if(now>data.expiry){delete allData[code];cleaned++;}}if(cleaned>0){localStorage.setItem(STORAGE_KEY,JSON.stringify(allData));console.log(`Очищено ${cleaned} устаревших файлов`);}}
+        cleanExpiredFiles();
+        const urlParams=new URLSearchParams(window.location.search);const codeFromUrl=urlParams.get('code');
+        if(codeFromUrl){document.getElementById('accessCode').value=codeFromUrl;switchTab('download');setTimeout(()=>downloadByCode(),500);}
+    </script>
+</body>
+</html>
